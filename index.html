@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>BEAT ROYALE SYNTHESIZER</title>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+
+  <div id="app">
+    <div v-if="!isAudioReady" class="loading-screen">
+      <div class="spinner" v-if="isLoading"></div>
+      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="icon-large color-blue">
+        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+      </svg>
+      <h1 class="logo-title">
+        BEAT ROYALE <span>SYNTH</span>
+      </h1>
+      <button @click="initAudio" :disabled="isLoading" class="btn-init">
+        {{ isLoading ? 'Loading Engine...' : 'Initialise Core' }}
+      </button>
+    </div>
+
+    <div v-else class="app-workspace">
+      
+      <header class="main-header">
+        <div class="logo-mini">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          <h1>BEAT ROYALE <span>SYNTH</span></h1>
+        </div>
+
+        <div class="preset-browser">
+          <button @click="triggerLoadPreset" class="btn-preset-action">Load</button>
+          <div class="preset-name" title="Click to rename patch">{{ presetName }}</div>
+          <button @click="savePreset" class="btn-preset-action">Save</button>
+          
+          <input type="file" accept=".json" @change="onPresetFile" ref="presetInput" class="hidden-input" />
+          <input type="file" accept="audio/*" @change="onSampleFile($event, 'A')" ref="sampleInputA" class="hidden-input" />
+          <input type="file" accept="audio/*" @change="onSampleFile($event, 'B')" ref="sampleInputB" class="hidden-input" />
+        </div>
+
+        <div class="global-controls">
+          <button @click="toggleRecord" :class="['btn-record', isRecording ? 'recording' : '']">
+            <span class="record-indicator"></span>
+            {{ isRecording ? 'Export' : 'Rec' }}
+          </button>
+
+          <div class="divider"></div>
+
+          <div class="control-col">
+            <span class="control-label">Glide</span>
+            <input type="range" min="0" max="100" v-model.number="synthState.glide" class="slider color-yellow slider-knob" />
+          </div>
+          <div class="control-col">
+            <span class="control-label">Voices</span>
+            <select v-model="synthState.polyphony" class="select-dropdown">
+              <option value="1">1 (Mono)</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="16">16</option>
+            </select>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="control-col">
+            <span class="control-label">Master</span>
+            <input type="range" min="-60" max="10" v-model.number="synthState.masterVol" class="slider color-blue slider-knob w-20" />
+          </div>
+          <button @click="activeTab = activeTab === 'FX' ? 'OSC' : 'FX'" :class="['btn-toggle', activeTab === 'FX' ? 'active' : '']">
+            FX Rack
+          </button>
+        </div>
+      </header>
+
+      <main class="main-content">
+        
+        <div class="column col-left">
+          
+          <div class="synth-panel">
+            <div class="panel-indicator bg-blue"></div>
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <input type="checkbox" v-model="synthState.oscA.on" class="checkbox-blue" />
+                <span class="panel-title text-blue">OSC A</span>
+              </div>
+              <select v-model="synthState.oscA.type" class="panel-select color-blue">
+                <option v-for="t in oscTypes" :key="t" :value="t">{{ t }}</option>
+              </select>
+            </div>
+            
+            <div class="panel-body">
+              <div class="osc-controls-row">
+                <div class="osc-params flex-1">
+                  <template v-if="synthState.oscA.type === 'Wavetable'">
+                     <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.wtPos" class="slider color-blue w-full" /><span class="control-label font-mono">Position</span></div>
+                     <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.warp" class="slider color-blue w-full" /><span class="control-label font-mono">Warp</span></div>
+                  </template>
+                  <template v-else-if="synthState.oscA.type === 'Granular'">
+                    <div class="control-col flex-1"><input type="range" min="1" max="100" v-model.number="synthState.oscA.granSize" class="slider color-blue w-full" /><span class="control-label font-mono">Grn Size</span></div>
+                    <div class="control-col flex-1"><input type="range" min="1" max="100" v-model.number="synthState.oscA.granDens" class="slider color-blue w-full" /><span class="control-label font-mono">Density</span></div>
+                  </template>
+                  <template v-else-if="synthState.oscA.type === 'Spectral'">
+                    <div class="control-col flex-1"><input type="range" min="-50" max="50" v-model.number="synthState.oscA.specFormant" class="slider color-blue w-full" /><span class="control-label font-mono">Formant</span></div>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.specSmear" class="slider color-blue w-full" /><span class="control-label font-mono">Smear</span></div>
+                  </template>
+                  <template v-else-if="synthState.oscA.type === 'Multisample'">
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.multiSpread" class="slider color-blue w-full" /><span class="control-label font-mono">Spread</span></div>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.multiCurve" class="slider color-blue w-full" /><span class="control-label font-mono">Vel Curve</span></div>
+                  </template>
+                  <template v-else>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.sampStart" class="slider color-blue w-full" /><span class="control-label font-mono">Start</span></div>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscA.sampEnd" class="slider color-blue w-full" /><span class="control-label font-mono">End</span></div>
+                  </template>
+                </div>
+
+                <div class="mini-visualizer" :class="{'clickable hover-border-blue': synthState.oscA.type !== 'Wavetable'}" @click="synthState.oscA.type !== 'Wavetable' && triggerLoadSample('A')">
+                   <canvas ref="oscAWaveCanvas" class="visualizer-canvas"></canvas>
+                   <div v-if="synthState.oscA.type !== 'Wavetable'" class="visualizer-overlay"><span>Load</span></div>
+                   <div v-if="synthState.oscA.type !== 'Wavetable'" class="visualizer-filename">{{ sampleNameA }}</div>
+                   <div class="visualizer-tag tag-blue">OUT</div>
+                </div>
+
+                <div class="faded-divider"></div>
+
+                <div class="grid-2x2 flex-1">
+                   <div class="num-input-row"><span>Crs</span><input type="number" v-model="synthState.oscA.coarse" class="num-input" /></div>
+                   <div class="num-input-row"><span>Fin</span><input type="number" v-model="synthState.oscA.fine" class="num-input" /></div>
+                   <div class="num-input-row"><span>Phs</span><input type="number" v-model="synthState.oscA.phase" class="num-input" /></div>
+                   <div class="num-input-row"><span>FM</span><input type="number" v-model="synthState.oscA.fm" class="num-input" /></div>
+                </div>
+              </div>
+
+              <div class="osc-mix-controls">
+                <div class="control-col"><span class="control-label uppercase">Unison</span><input type="range" min="1" max="16" v-model.number="synthState.oscA.unison" class="slider color-neutral w-full" /><span class="control-readout">{{ synthState.oscA.unison }}v</span></div>
+                <div class="control-col"><span class="control-label uppercase">Detune</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.oscA.detune" class="slider color-neutral w-full" /><span class="control-readout">{{ synthState.oscA.detune.toFixed(2) }}</span></div>
+                <div class="control-col"><span class="control-label uppercase">Pan</span><input type="range" min="-1" max="1" step="0.1" v-model.number="synthState.oscA.pan" class="slider color-emerald w-full" /><span class="control-readout">{{ synthState.oscA.pan }}</span></div>
+                <div class="control-col"><span class="control-label uppercase">Level</span><input type="range" min="0" max="100" v-model.number="synthState.oscA.level" class="slider color-blue w-full" /><span class="control-readout">{{ synthState.oscA.level }}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="synth-panel">
+            <div class="panel-indicator bg-emerald"></div>
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <input type="checkbox" v-model="synthState.oscB.on" class="checkbox-emerald" />
+                <span class="panel-title text-emerald">OSC B</span>
+              </div>
+              <select v-model="synthState.oscB.type" class="panel-select color-emerald">
+                <option v-for="t in oscTypes" :key="t" :value="t">{{ t }}</option>
+              </select>
+            </div>
+            
+            <div class="panel-body">
+              <div class="osc-controls-row">
+                <div class="osc-params flex-1">
+                  <template v-if="synthState.oscB.type === 'Wavetable'">
+                     <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.wtPos" class="slider color-emerald w-full" /><span class="control-label font-mono">Position</span></div>
+                     <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.warp" class="slider color-emerald w-full" /><span class="control-label font-mono">Warp</span></div>
+                  </template>
+                  <template v-else-if="synthState.oscB.type === 'Granular'">
+                    <div class="control-col flex-1"><input type="range" min="1" max="100" v-model.number="synthState.oscB.granSize" class="slider color-emerald w-full" /><span class="control-label font-mono">Grn Size</span></div>
+                    <div class="control-col flex-1"><input type="range" min="1" max="100" v-model.number="synthState.oscB.granDens" class="slider color-emerald w-full" /><span class="control-label font-mono">Density</span></div>
+                  </template>
+                  <template v-else-if="synthState.oscB.type === 'Spectral'">
+                    <div class="control-col flex-1"><input type="range" min="-50" max="50" v-model.number="synthState.oscB.specFormant" class="slider color-emerald w-full" /><span class="control-label font-mono">Formant</span></div>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.specSmear" class="slider color-emerald w-full" /><span class="control-label font-mono">Smear</span></div>
+                  </template>
+                  <template v-else-if="synthState.oscB.type === 'Multisample'">
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.multiSpread" class="slider color-emerald w-full" /><span class="control-label font-mono">Spread</span></div>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.multiCurve" class="slider color-emerald w-full" /><span class="control-label font-mono">Vel Curve</span></div>
+                  </template>
+                  <template v-else>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.sampStart" class="slider color-emerald w-full" /><span class="control-label font-mono">Start</span></div>
+                    <div class="control-col flex-1"><input type="range" min="0" max="100" v-model.number="synthState.oscB.sampEnd" class="slider color-emerald w-full" /><span class="control-label font-mono">End</span></div>
+                  </template>
+                </div>
+                
+                <div class="mini-visualizer" :class="{'clickable hover-border-emerald': synthState.oscB.type !== 'Wavetable'}" @click="synthState.oscB.type !== 'Wavetable' && triggerLoadSample('B')">
+                   <canvas ref="oscBWaveCanvas" class="visualizer-canvas"></canvas>
+                   <div v-if="synthState.oscB.type !== 'Wavetable'" class="visualizer-overlay"><span>Load</span></div>
+                   <div v-if="synthState.oscB.type !== 'Wavetable'" class="visualizer-filename">{{ sampleNameB }}</div>
+                   <div class="visualizer-tag tag-emerald">OUT</div>
+                </div>
+
+                <div class="faded-divider"></div>
+
+                <div class="grid-2x2 flex-1">
+                   <div class="num-input-row"><span>Crs</span><input type="number" v-model="synthState.oscB.coarse" class="num-input" /></div>
+                   <div class="num-input-row"><span>Fin</span><input type="number" v-model="synthState.oscB.fine" class="num-input" /></div>
+                   <div class="num-input-row"><span>Phs</span><input type="number" v-model="synthState.oscB.phase" class="num-input" /></div>
+                   <div class="num-input-row"><span>FM</span><input type="number" v-model="synthState.oscB.fm" class="num-input" /></div>
+                </div>
+              </div>
+
+              <div class="osc-mix-controls">
+                <div class="control-col"><span class="control-label uppercase">Unison</span><input type="range" min="1" max="16" v-model.number="synthState.oscB.unison" class="slider color-neutral w-full" /><span class="control-readout">{{ synthState.oscB.unison }}v</span></div>
+                <div class="control-col"><span class="control-label uppercase">Detune</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.oscB.detune" class="slider color-neutral w-full" /><span class="control-readout">{{ synthState.oscB.detune.toFixed(2) }}</span></div>
+                <div class="control-col"><span class="control-label uppercase">Pan</span><input type="range" min="-1" max="1" step="0.1" v-model.number="synthState.oscB.pan" class="slider color-emerald w-full" /><span class="control-readout">{{ synthState.oscB.pan }}</span></div>
+                <div class="control-col"><span class="control-label uppercase">Level</span><input type="range" min="0" max="100" v-model.number="synthState.oscB.level" class="slider color-emerald w-full" /><span class="control-readout">{{ synthState.oscB.level }}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-noise-panel">
+            <div class="sub-section">
+              <div class="panel-indicator bg-rose"></div>
+              <div class="panel-header slim-header">
+                 <input type="checkbox" v-model="synthState.sub.on" class="checkbox-rose" />
+                 <span class="panel-title text-rose">SUB</span>
+              </div>
+              <div class="module-controls">
+                 <div class="control-col">
+                    <select v-model="synthState.sub.shape" class="select-small"><option value="sine">Sin</option><option value="square">Sqr</option><option value="triangle">Tri</option></select>
+                    <span class="control-label pt-1">Shape</span>
+                 </div>
+                 <div class="control-col">
+                    <input type="number" v-model="synthState.sub.oct" class="num-input-small text-center" />
+                    <span class="control-label pt-1">Oct</span>
+                 </div>
+                 <div class="control-col w-10">
+                    <input type="range" min="0" max="100" v-model.number="synthState.sub.level" class="slider color-rose w-full" />
+                    <span class="control-label pt-1">Level</span>
+                 </div>
+              </div>
+            </div>
+            <div class="noise-section">
+              <div class="panel-indicator bg-neutral"></div>
+              <div class="panel-header slim-header">
+                 <input type="checkbox" v-model="synthState.noise.on" class="checkbox-neutral" />
+                 <span class="panel-title text-neutral">NOISE</span>
+              </div>
+              <div class="module-controls">
+                 <div class="control-col">
+                    <select v-model="synthState.noise.color" class="select-small w-12"><option value="white">White</option><option value="pink">Pink</option><option value="brown">Brown</option></select>
+                    <span class="control-label pt-1">Color</span>
+                 </div>
+                 <div class="control-col w-12">
+                    <input type="range" min="0" max="100" v-model.number="synthState.noise.level" class="slider color-neutral w-full" />
+                    <span class="control-label pt-1">Level</span>
+                 </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="column col-center">
+          
+          <div class="master-meter-section">
+            <div class="master-dyn-strip">
+               <div class="dyn-title">Master<br>Dyn</div>
+               <div class="dyn-control">
+                  <input type="range" min="-60" max="0" step="1" v-model.number="synthState.masterFx.compThresh" class="slider-vertical color-orange" />
+                  <span class="control-label font-mono">Comp</span>
+               </div>
+               <div class="dyn-control mt-2">
+                  <input type="range" min="-24" max="0" step="0.1" v-model.number="synthState.masterFx.limitThresh" class="slider-vertical color-red" />
+                  <span class="control-label font-mono">Limit</span>
+               </div>
+            </div>
+
+            <div class="meter-canvas-wrapper">
+              <canvas ref="metersCanvas" class="visualizer-canvas"></canvas>
+            </div>
+          </div>
+
+          <div class="synth-panel filter-panel">
+            <div class="panel-indicator bg-orange"></div>
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <input type="checkbox" v-model="synthState.filter.on" class="checkbox-orange" />
+                <span class="panel-title text-orange">Filter</span>
+              </div>
+              <select v-model="synthState.filter.type" class="panel-select color-orange">
+                <option value="lowpass">MG Low 12</option>
+                <option value="highpass">HP 24</option>
+                <option value="bandpass">Bandpass</option>
+              </select>
+            </div>
+            
+            <div class="filter-grid">
+              <div class="control-col-large">
+                 <span class="readout-large color-orange">{{ synthState.filter.cutoff }} Hz</span>
+                 <input type="range" min="20" max="10000" step="10" v-model.number="synthState.filter.cutoff" class="slider color-orange w-full" />
+                 <span class="label-large">Cutoff</span>
+              </div>
+              <div class="control-col-large">
+                 <span class="readout-large color-orange">{{ synthState.filter.res.toFixed(1) }}</span>
+                 <input type="range" min="0" max="10" step="0.1" v-model.number="synthState.filter.res" class="slider color-orange w-full" />
+                 <span class="label-large">Resonance</span>
+              </div>
+              <div class="control-col-large">
+                 <span class="readout-large color-orange">{{ synthState.filter.drive.toFixed(1) }}</span>
+                 <input type="range" min="0" max="10" step="0.1" v-model.number="synthState.filter.drive" class="slider color-orange w-full" />
+                 <span class="label-large">Drive</span>
+              </div>
+              <div class="control-col-large">
+                 <span class="readout-large color-neutral">{{ synthState.filter.envAmt }}%</span>
+                 <input type="range" min="0" max="100" v-model.number="synthState.filter.envAmt" class="slider color-neutral w-full" />
+                 <span class="label-large">Env Amt</span>
+              </div>
+              <div class="control-col-large">
+                 <span class="readout-large color-neutral">{{ synthState.filter.keytrack }}%</span>
+                 <input type="range" min="0" max="100" v-model.number="synthState.filter.keytrack" class="slider color-neutral w-full" />
+                 <span class="label-large">KBD Track</span>
+              </div>
+              <div class="control-col-large">
+                 <span class="readout-large color-neutral">{{ synthState.filter.pan }}</span>
+                 <input type="range" min="-1" max="1" step="0.1" v-model.number="synthState.filter.pan" class="slider color-neutral w-full" />
+                 <span class="label-large">Pan</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="column col-right modulators-grid">
+          
+          <div class="synth-panel">
+            <div class="panel-indicator bg-purple"></div>
+            <div class="panel-header slim-header">
+              <span class="panel-title text-purple">ENV 1 (AMP)</span>
+            </div>
+            <div class="env-controls">
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0.01" max="2" step="0.01" v-model.number="synthState.env1.a" class="slider-vertical color-purple" />
+                 <span class="env-label">A</span>
+               </div>
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0.01" max="2" step="0.01" v-model.number="synthState.env1.d" class="slider-vertical color-purple" />
+                 <span class="env-label">D</span>
+               </div>
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0" max="1" step="0.01" v-model.number="synthState.env1.s" class="slider-vertical color-purple" />
+                 <span class="env-label">S</span>
+               </div>
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0.01" max="5" step="0.01" v-model.number="synthState.env1.r" class="slider-vertical color-purple" />
+                 <span class="env-label">R</span>
+               </div>
+            </div>
+          </div>
+
+          <div class="synth-panel">
+            <div class="panel-indicator bg-cyan"></div>
+            <div class="panel-header slim-header">
+              <span class="panel-title text-cyan">ENV 2 (MOD)</span>
+            </div>
+            <div class="env-controls">
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0.01" max="2" step="0.01" v-model.number="synthState.env2.a" class="slider-vertical color-cyan" />
+                 <span class="env-label">A</span>
+               </div>
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0.01" max="2" step="0.01" v-model.number="synthState.env2.d" class="slider-vertical color-cyan" />
+                 <span class="env-label">D</span>
+               </div>
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0" max="1" step="0.01" v-model.number="synthState.env2.s" class="slider-vertical color-cyan" />
+                 <span class="env-label">S</span>
+               </div>
+               <div class="env-slider-wrapper">
+                 <input type="range" min="0.01" max="5" step="0.01" v-model.number="synthState.env2.r" class="slider-vertical color-cyan" />
+                 <span class="env-label">R</span>
+               </div>
+            </div>
+          </div>
+
+          <div class="synth-panel">
+            <div class="panel-indicator bg-yellow"></div>
+            <div class="panel-header slim-header">
+              <span class="panel-title text-yellow">LFO 1</span>
+              <select v-model="synthState.lfo1.shape" class="panel-select color-yellow border-none">
+                <option value="sine">Sine</option>
+                <option value="triangle">Tri</option>
+                <option value="square">Sqr</option>
+                <option value="sawtooth">Saw</option>
+              </select>
+            </div>
+            <div class="lfo-controls">
+               <div class="control-col flex-1">
+                 <span class="control-readout-small">{{ synthState.lfo1.rate.toFixed(1) }}</span>
+                 <input type="range" min="0.1" max="20" step="0.1" v-model.number="synthState.lfo1.rate" class="slider color-yellow w-full" />
+                 <span class="control-label uppercase pt-1">Rate</span>
+               </div>
+               <div class="control-col flex-1">
+                 <span class="control-readout-small">{{ synthState.lfo1.depth }}%</span>
+                 <input type="range" min="0" max="100" v-model.number="synthState.lfo1.depth" class="slider color-yellow w-full" />
+                 <span class="control-label uppercase pt-1">Depth</span>
+               </div>
+               <div class="control-col flex-1">
+                 <span class="control-readout-small">{{ synthState.lfo1.delay }}s</span>
+                 <input type="range" min="0" max="5" step="0.1" v-model.number="synthState.lfo1.delay" class="slider color-yellow w-full" />
+                 <span class="control-label uppercase pt-1">Delay</span>
+               </div>
+            </div>
+          </div>
+
+          <div class="synth-panel">
+            <div class="panel-indicator bg-gold"></div>
+            <div class="panel-header slim-header">
+              <span class="panel-title text-gold">LFO 2</span>
+              <select v-model="synthState.lfo2.shape" class="panel-select color-gold border-none">
+                <option value="sine">Sine</option>
+                <option value="triangle">Tri</option>
+                <option value="square">Sqr</option>
+                <option value="sawtooth">Saw</option>
+              </select>
+            </div>
+            <div class="lfo-controls">
+               <div class="control-col flex-1">
+                 <span class="control-readout-small">{{ synthState.lfo2.rate.toFixed(1) }}</span>
+                 <input type="range" min="0.1" max="20" step="0.1" v-model.number="synthState.lfo2.rate" class="slider color-gold w-full" />
+                 <span class="control-label uppercase pt-1">Rate</span>
+               </div>
+               <div class="control-col flex-1">
+                 <span class="control-readout-small">{{ synthState.lfo2.depth }}%</span>
+                 <input type="range" min="0" max="100" v-model.number="synthState.lfo2.depth" class="slider color-gold w-full" />
+                 <span class="control-label uppercase pt-1">Depth</span>
+               </div>
+               <div class="control-col flex-1">
+                 <span class="control-readout-small">{{ synthState.lfo2.delay }}s</span>
+                 <input type="range" min="0" max="5" step="0.1" v-model.number="synthState.lfo2.delay" class="slider color-gold w-full" />
+                 <span class="control-label uppercase pt-1">Delay</span>
+               </div>
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+      <footer class="app-footer">
+        
+        <div v-show="activeTab === 'FX'" class="fx-rack">
+           <div class="fx-module">
+              <div class="fx-title">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-small color-rose"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                 Distortion
+              </div>
+              <div class="fx-params">
+                 <div class="fx-row"><span class="fx-label">Drive</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.dstDrive" class="slider flex-1 color-rose" /></div>
+                 <div class="fx-row"><span class="fx-label">Tone</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.dstTone" class="slider flex-1 color-rose" /></div>
+                 <div class="fx-row"><span class="fx-label">Mix</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.dstWet" class="slider flex-1 color-rose" /></div>
+              </div>
+           </div>
+
+           <div class="fx-module">
+              <div class="fx-title">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-small color-indigo"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                 Modulation
+              </div>
+              <div class="fx-params">
+                 <div class="fx-row"><span class="fx-label">Rate</span><input type="range" min="0.1" max="10" step="0.1" v-model.number="synthState.fx.choRate" class="slider flex-1 color-indigo" /></div>
+                 <div class="fx-row"><span class="fx-label">Depth</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.choDepth" class="slider flex-1 color-indigo" /></div>
+                 <div class="fx-row"><span class="fx-label">Mix</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.choWet" class="slider flex-1 color-indigo" /></div>
+              </div>
+           </div>
+
+           <div class="fx-module">
+              <div class="fx-title">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-small color-pink"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                 Delay
+              </div>
+              <div class="fx-params">
+                 <div class="fx-row"><span class="fx-label">Time</span><input type="range" min="0.1" max="2" step="0.05" v-model.number="synthState.fx.dlyTime" class="slider flex-1 color-pink" /></div>
+                 <div class="fx-row"><span class="fx-label">Fbk</span><input type="range" min="0" max="0.95" step="0.01" v-model.number="synthState.fx.dlyFeed" class="slider flex-1 color-pink" /></div>
+                 <div class="fx-row"><span class="fx-label">Mix</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.dlyWet" class="slider flex-1 color-pink" /></div>
+              </div>
+           </div>
+
+           <div class="fx-module border-none">
+              <div class="fx-title">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-small color-purple"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path></svg>
+                 Reverb
+              </div>
+              <div class="fx-params">
+                 <div class="fx-row"><span class="fx-label">Size</span><input type="range" min="0.1" max="1" step="0.01" v-model.number="synthState.fx.revSize" class="slider flex-1 color-purple" /></div>
+                 <div class="fx-row"><span class="fx-label">Decay</span><input type="range" min="0.1" max="10" step="0.1" v-model.number="synthState.fx.revDecay" class="slider flex-1 color-purple" /></div>
+                 <div class="fx-row"><span class="fx-label">Mix</span><input type="range" min="0" max="1" step="0.01" v-model.number="synthState.fx.revWet" class="slider flex-1 color-purple" /></div>
+              </div>
+           </div>
+        </div>
+
+        <div class="keyboard-section group">
+           
+           <div @click="synthState.swellEnabled = !synthState.swellEnabled" 
+                class="swell-toggle"
+                :class="synthState.swellEnabled ? 'active' : ''">
+              SWELL: {{ synthState.swellEnabled ? 'ON' : 'OFF' }}
+           </div>
+
+           <div class="swell-tooltip">EXPRESSION SWELL: CLICK & DRAG UP/DOWN (ENABLE ON RIGHT)</div>
+
+           <div class="keys-container">
+              <div class="white-keys-layer">
+                <template v-for="(k, i) in keyboardKeys" :key="i">
+                  <div v-if="!k.isBlack" 
+                       @mousedown="onKeyMouseDown($event, k.note)" 
+                       @mouseup="onKeyMouseUp(k.note)" 
+                       @mouseleave="onKeyMouseLeave(k.note)"
+                       @mouseenter="onKeyMouseEnter($event, k.note)"
+                       class="key-white"
+                       :class="activeNotes.has(k.note) ? 'active' : ''"></div>
+                </template>
+              </div>
+              <div class="black-keys-layer">
+                <template v-for="(k, i) in keyboardKeys" :key="'b'+i">
+                  <div v-if="!k.isBlack && i < keyboardKeys.length - 1 && keyboardKeys[i+1].isBlack" class="black-key-wrapper">
+                     <div @mousedown.stop="onKeyMouseDown($event, keyboardKeys[i+1].note)" 
+                          @mouseup.stop="onKeyMouseUp(keyboardKeys[i+1].note)" 
+                          @mouseleave="onKeyMouseLeave(keyboardKeys[i+1].note)"
+                          @mouseenter.stop="onKeyMouseEnter($event, keyboardKeys[i+1].note)"
+                          class="key-black"
+                          :class="activeNotes.has(keyboardKeys[i+1].note) ? 'active' : ''"></div>
+                  </div>
+                  <div v-else-if="!k.isBlack" class="black-key-spacer"></div>
+                </template>
+              </div>
+           </div>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+</body>
+</html>
